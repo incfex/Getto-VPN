@@ -1,3 +1,5 @@
+#include "createTUNfd.h"
+
 int createTUNfd() {
     int tunfd;
     struct ifreq ifr;

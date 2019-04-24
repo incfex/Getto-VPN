@@ -1,16 +1,25 @@
-//peerAddr is defined globally
+#include "TUNxSocket.h"
 
-void TUNtoSock (int tunfd, int sockfd){
+
+void TUNtoSock (int tunfd, SSL* ssl, int bufsize){
     int len;
-    char buff[BUFF_SIZE];
+    char buff[bufsize];
 
     printf("Got a packet from TUN\n");
 
-    bzero(buff, BUFF_SIZE);
-    len = read(tunfd, buff, BUFF_SIZE);
-    sendto(sockfd, buff, len, 0, (struct sockaddr *) &peerAddr, sizeof(peerAddr));
+    bzero(buff, bufsize);
+    len = read(tunfd, buff, bufsize-1);
+    SSL_write(ssl, send, len);
 }
 
-void SocktoTUN (int tunfd, int sockfd){
+void SocktoTUN (int tunfd, SSL* ssl, int bufsize){
+    int len;
+    char buff[bufsize];
 
+    printf("Got a packet from the tunnel\n");
+
+    bzero(buff, bufsize);
+
+    len = SSL_read(ssl, buff, bufsize-1);
+    write(tunfd, buff, len);
 }

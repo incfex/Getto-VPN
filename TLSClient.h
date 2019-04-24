@@ -8,4 +8,4 @@
 
 SSL* setupTLSClient(const char* hostname);
 int setupTCPClient(const char* hostname, int port, const char* ipAddr);
-int TLSClient(const char* hostname, int port, const char* ipAddr);
+SSL* TLSClient(const char* hostname, int port, const char* ipAddr);

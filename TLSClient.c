@@ -1,3 +1,5 @@
+#include "TLSClient.h"
+
 SSL* setupTLSClient(const char* hostname){
     SSL_library_init();
     SSL_load_error_strings();
@@ -11,7 +13,7 @@ SSL* setupTLSClient(const char* hostname){
     ctx = SSL_CTX_new(meth);
 
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-    if(SSL_CTX_load_verify_location(ctx, NULL, CA_DIR) < 1){
+    if(SSL_CTX_load_verify_locations(ctx, NULL, CA_DIR) < 1){
         printf("Error setting the verify locations. \n");
         exit(0);
     }
@@ -26,7 +28,7 @@ SSL* setupTLSClient(const char* hostname){
 int setupTCPClient(const char* hostname, int port, const char* ipAddr){
     struct sockaddr_in server_addr;
 
-    int sockfd = socket(AF_INET, SOCK_StREAM, IPPROTO_TCP);
+    int sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
     memset(&server_addr, '\0', sizeof(server_addr));
 
@@ -39,8 +41,8 @@ int setupTCPClient(const char* hostname, int port, const char* ipAddr){
     return sockfd;
 }
 
-int TLSClient(const char* hostname, int port, const char* ipAddr){
-    SSL *ssl = setTLSClient(hostname);
+SSL* TLSClient(const char* hostname, int port, const char* ipAddr){
+    SSL *ssl = setupTLSClient(hostname);
     int sockfd = setupTCPClient(hostname, port, ipAddr);
 
     SSL_set_fd(ssl, sockfd);
