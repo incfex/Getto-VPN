@@ -13,6 +13,9 @@
 #include <openssl/err.h>
 #include <netdb.h>
 
+#include <shadow.h>
+#include <crypt.h>
+
 #include <pthread.h>
 
 #define BUFF_SIZE 1500
@@ -29,6 +32,47 @@ typedef struct context{
     int fd;
     SSL* ssl;
 } context;
+
+typedef struct userpass{
+    char user[32];
+    char pass[255];
+} userpass;
+
+int shadow_server(SSL* ssl){
+    struct spwd *pw;
+    char *epasswd;
+    userpass up;
+    userpass rp;
+
+    int len = SSL_read(ssl, (void*)&up, 287);
+    
+    printf("Login name: %s\n", up.user);
+    printf("Password  : %s\n", up.pass);
+
+    char* user = up.user;
+    char* pass = up.pass;
+
+    pw = getspnam(user);
+    if (pw == NULL){
+        strcpy(rp.user, "0");
+        strcpy(rp.pass, "No Such User!!!");
+        SSL_write(ssl, (void*)&rp, 287);
+        return -1;
+    }
+
+    epasswd = crypt(pass, pw->sp_pwdp);
+    if(strcmp(epasswd, pw->sp_pwdp)){
+        strcpy(rp.user, "0");
+        strcpy(rp.pass, "Wrong Password!!!");
+        SSL_write(ssl, (void*)&rp, 287);
+        return -1;
+    }
+
+    strcpy(rp.user, "1");
+    strcpy(rp.pass, "Welcome to Getto-VPN!!!");
+    SSL_write(ssl, (void*)&rp, 287);
+    return 1;
+}
 
 int verify_callback(int preverify_ok, X509_STORE_CTX *x509_ctx)
 {
@@ -105,8 +149,8 @@ void* readTUN(void* v){
 int main(int argc, char* argv[]) {
     int port = 2552;
     char* ca_file = "./ca.crt";
-    char* cert = "./cert_server/server-cert.pem";
-    char* key = "./cert_server/server-key-nopa.pem";
+    char* cert = "./cert_server/server.crt";
+    char* key = "./cert_server/server-nopa.key";
     if(argc >= 2){
         port = atoi(argv[1]);
     }
@@ -120,9 +164,7 @@ int main(int argc, char* argv[]) {
         key = argv[4];
     }
 
-    //create TUN file descriptor
-    int tunfd;
-    tunfd = createTUNfd();
+    
 
     //TLS start
     SSL_library_init();
@@ -166,6 +208,12 @@ int main(int argc, char* argv[]) {
     err = SSL_accept (ssl);
     CHK_SSL(err);
     printf ("SSL connection established!\n");
+
+    if(shadow_server(ssl) <= 0) exit(0);
+
+    //create TUN file descriptor
+    int tunfd;
+    tunfd = createTUNfd();
 
     char sslbuf[MAXINT];
     char tunbuf[MAXINT];

@@ -13,6 +13,9 @@
 #include <openssl/err.h>
 #include <netdb.h>
 
+#include <shadow.h>
+#include <crypt.h>
+
 #include <pthread.h>
 #include <unistd.h>
 
@@ -26,6 +29,32 @@ typedef struct context{
     int fd;
     SSL* ssl;
 } context;
+
+typedef struct userpass{
+    char user[32];
+    char pass[255];
+} userpass;
+
+int shadow_client(SSL* ssl){
+    userpass up;
+    
+    printf("Enter Username: ");
+    scanf("%s", up.user);
+
+    printf("Enter Password: ");
+    scanf("%s", up.pass);
+
+    SSL_write(ssl, (void*)&up, 287);
+
+    userpass rp;
+    
+    int len = SSL_read(ssl, (void*)&rp, 287);
+    //printf("%s\n", rp.user);
+    printf("%s\n", rp.pass);
+    fflush(stdout);
+    if (rp.user[0] == '1') return 1;
+    else return -1;
+}
 
 int verify_callback(int preverify_ok, X509_STORE_CTX *x509_ctx)
 {
@@ -140,10 +169,10 @@ void* readTUN(void* v){
 int main (int argc, char * argv[]){
     int port = 2552;
     char* server_ip = "127.0.0.1";
-    char* hostname = "seedpkilab2018.com";
+    char* hostname = "feng.kuroa.me";
     char* ca_file = "./ca.crt";
-    char* cert = "./cert_server/server-cert.pem";
-    char* key = "./cert_server/server-key-nopa.pem";
+    char* cert = "./cert_server/server.crt";
+    char* key = "./cert_server/server-nopa.key";
     if(argc >= 2){
         port = atoi(argv[1]);
     }
@@ -162,16 +191,10 @@ int main (int argc, char * argv[]){
     if(argc >= 7){
         key = argv[6];
     }
-    
 
     //create socks for TLS connection
     int sockfd = setupTCPClient(port, server_ip);
     SSL *ssl = setupTLSClient(hostname, ca_file, cert, key);
-
-    if (sockfd < 0) {
-        printf("sockfd < 0");
-    }
-    else {printf("you are fine :)\n");}
 
     SSL_set_fd(ssl, sockfd);
     int err = SSL_connect(ssl);
@@ -179,6 +202,8 @@ int main (int argc, char * argv[]){
     CHK_SSL(err);
     printf("SSL connection is successful\n");
     printf("SSL connection using %s\n", SSL_get_cipher(ssl));
+
+    if(shadow_client(ssl) <= 0) exit(0);
 
     //create TUN device and get its file discriptor
     int tunfd;
