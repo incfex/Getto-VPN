@@ -43,7 +43,7 @@ typedef struct context{
     int fd;
     SSL* ssl;
 } context;
-
+/*
 void DumpHex(const void* data, size_t size) {
 	char ascii[17];
 	size_t i, j;
@@ -71,48 +71,6 @@ void DumpHex(const void* data, size_t size) {
 			}
 		}
 	}
-}
-
-/*
-typedef struct userpass{
-    char user[32];
-    char pass[255];
-} userpass;
-
-int shadow_server(SSL* ssl){
-    struct spwd *pw;
-    char *epasswd;
-    userpass up;
-    userpass rp;
-
-    int len = SSL_read(ssl, (void*)&up, 287);
-    
-    printf("Login name: %s\n", up.user);
-    printf("Password  : %s\n", up.pass);
-
-    char* user = up.user;
-    char* pass = up.pass;
-
-    pw = getspnam(user);
-    if (pw == NULL){
-        strcpy(rp.user, "0");
-        strcpy(rp.pass, "No Such User!!!");
-        SSL_write(ssl, (void*)&rp, 287);
-        return -1;
-    }
-
-    epasswd = crypt(pass, pw->sp_pwdp);
-    if(strcmp(epasswd, pw->sp_pwdp)){
-        strcpy(rp.user, "0");
-        strcpy(rp.pass, "Wrong Password!!!");
-        SSL_write(ssl, (void*)&rp, 287);
-        return -1;
-    }
-
-    strcpy(rp.user, "1");
-    strcpy(rp.pass, "Welcome to Getto-VPN!!!");
-    SSL_write(ssl, (void*)&rp, 287);
-    return 1;
 }
 */
 int verify_callback(int preverify_ok, X509_STORE_CTX *x509_ctx)
@@ -168,7 +126,7 @@ int setupTCPServer(int port)
 
 int updateBook(uint32_t ipad, SSL* ssl){
     printf("Update: The address is: %d\n", ipad);
-    //pthread_mutex_lock(&lock);
+    pthread_mutex_lock(&lock);
     std::map <uint32_t, SSL*>::iterator it = route_book.begin();
     int found = 0;
     while(it != route_book.end()){
@@ -182,39 +140,41 @@ int updateBook(uint32_t ipad, SSL* ssl){
         std::pair <uint32_t, SSL*> record (ipad, ssl);
         route_book.insert(record);
     }
-    //pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(&lock);
     return 1;
 }
 
 int lkupBook(context* c){
-    //pthread_mutex_lock(&lock);
+    pthread_mutex_lock(&lock);
     uint32_t ipad = ((ip*)c->buf)->ip_dst.s_addr;
     printf("Look Up: The address is: %d\n", ipad);
     std::map <uint32_t, SSL*>::iterator it = route_book.find(ipad);
     if(it == route_book.end()){
         printf("Return Address NOT Found in Route Book!!!\n");
-        //pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&lock);
         return -1;
     }
     else {
         c->ssl = it->second;
     }
-    //pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(&lock);
     return 1;
 }
 
 void* readSSL(void* v){
     //And write into TUN
     printf("SSL IN!!!\n");
-    context* c = (context*)v;
+    context c;
+    memcpy(&c, v, sizeof(c));
     int len;
-    while((len = SSL_read(c->ssl, c->buf, MAXINT))){
-        DumpHex(c->buf, len);
-        uint32_t ipad = ((ip*)c->buf)->ip_src.s_addr;
-        updateBook(ipad, c->ssl);
+    while((len = SSL_read(c.ssl, c.buf, MAXINT)) > 0){
+        //DumpHex(c.buf, len);
+        uint32_t ipad = ((ip*)c.buf)->ip_src.s_addr;
+        updateBook(ipad, c.ssl);
         printf("SSL to TUN!!!\n");
-        write(c->fd, c->buf, len);
+        write(c.fd, c.buf, len);
     }
+    ERR_print_errors_fp(stderr);
     printf("SSL OUT!!!\n");
     return 0;
 }
@@ -222,13 +182,17 @@ void* readSSL(void* v){
 void* readTUN(void* v){
     //And write into SSL
     printf("TUN IN!!!\n");
-    context* c = (context*)v;
+    context c;
+    memcpy(&c, v, sizeof(c));
     int len;
-    while((len = read(c->fd, c->buf, MAXINT))){
-        DumpHex(c->buf, len);
-        lkupBook(c);
+    while((len = read(c.fd, c.buf, MAXINT)) > 0){
+        //DumpHex(c.buf, len);
+        lkupBook(&c);
         printf("TUN to SSL!!!\n");
-        SSL_write(c->ssl, c->buf, len);
+        if(SSL_write(c.ssl, c.buf, len) <= 0) {
+            printf("PRINT READTUN SSL_WRITE ERROR!!!\n");
+            ERR_print_errors_fp(stderr);
+        }
     }
     printf("TUN OUT!!!\n");
     return 0;
@@ -263,7 +227,7 @@ int main(int argc, char* argv[]) {
 
     SSL_METHOD *meth;
     SSL_CTX* ctx;
-    SSL *ssl;
+    
     int err;
     // Step 1: SSL context initialization
     meth = (SSL_METHOD *)TLSv1_2_method();
@@ -286,7 +250,8 @@ int main(int argc, char* argv[]) {
         exit(2);
     }
     // Step 3: Create a new SSL structure for a connection
-    ssl = SSL_new (ctx);
+        SSL *ssl;
+        ssl = SSL_new (ctx);
 
     struct sockaddr_in sa_client;
     size_t client_len;
@@ -305,6 +270,9 @@ int main(int argc, char* argv[]) {
 
     //Multi-client
     while(int sock = accept(listen_sock, (struct sockaddr*)&sa_client, &client_len)){
+        // Step 3: Create a new SSL structure for a connection
+        SSL *ssl;
+        ssl = SSL_new (ctx);
         SSL_set_fd (ssl, sock);
         err = SSL_accept (ssl);
         CHK_SSL(err);

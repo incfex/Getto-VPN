@@ -148,10 +148,11 @@ void* readSSL(void* v){
     printf("SSL IN!!!\n");
     context* c = (context*)v;
     int len;
-    while((len = SSL_read(c->ssl, c->buf, MAXINT))){
+    while((len = SSL_read(c->ssl, c->buf, MAXINT)) > 0){
         printf("SSL to TUN!!!\n");
         write(c->fd, c->buf, len);
     }
+    ERR_print_errors_fp(stderr);
     return 0;
 }
 
@@ -160,7 +161,7 @@ void* readTUN(void* v){
     printf("TUN IN!!!\n");
     context* c = (context*)v;
     int len;
-    while((len = read(c->fd, c->buf, MAXINT))){
+    while((len = read(c->fd, c->buf, MAXINT)) > 0){
         printf("TUN to SSL!!!\n");
         SSL_write(c->ssl, c->buf, len);
     }
