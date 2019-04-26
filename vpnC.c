@@ -74,6 +74,7 @@ int verify_callback(int preverify_ok, X509_STORE_CTX *x509_ctx)
        printf("Verification failed: %s.\n",
                     X509_verify_cert_error_string(err));
     }
+    return preverify_ok;
 }
 
 int createTUNfd() {
@@ -147,10 +148,11 @@ void* readSSL(void* v){
     printf("SSL IN!!!\n");
     context* c = (context*)v;
     int len;
-    while(len = SSL_read(c->ssl, c->buf, MAXINT)){
+    while((len = SSL_read(c->ssl, c->buf, MAXINT))){
         printf("SSL to TUN!!!\n");
         write(c->fd, c->buf, len);
     }
+    return 0;
 }
 
 void* readTUN(void* v){
@@ -158,10 +160,11 @@ void* readTUN(void* v){
     printf("TUN IN!!!\n");
     context* c = (context*)v;
     int len;
-    while(len = read(c->fd, c->buf, MAXINT)){
+    while((len = read(c->fd, c->buf, MAXINT))){
         printf("TUN to SSL!!!\n");
         SSL_write(c->ssl, c->buf, len);
     }
+    return 0;
 }
 
 struct sockaddr_in* resolver(char* hostname){

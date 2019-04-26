@@ -130,6 +130,7 @@ int verify_callback(int preverify_ok, X509_STORE_CTX *x509_ctx)
        printf("Verification failed: %s.\n",
                     X509_verify_cert_error_string(err));
     }
+    return preverify_ok;
 }
 
 int createTUNfd() {
@@ -167,7 +168,7 @@ int setupTCPServer(int port)
 
 int updateBook(uint32_t ipad, SSL* ssl){
     printf("Update: The address is: %d\n", ipad);
-    pthread_mutex_lock(&lock);
+    //pthread_mutex_lock(&lock);
     std::map <uint32_t, SSL*>::iterator it = route_book.begin();
     int found = 0;
     while(it != route_book.end()){
@@ -175,28 +176,31 @@ int updateBook(uint32_t ipad, SSL* ssl){
             found = 1;
             it->second = ssl;
         }
+        it++;
     }
     if(!found){
         std::pair <uint32_t, SSL*> record (ipad, ssl);
         route_book.insert(record);
     }
-    pthread_mutex_unlock(&lock);
+    //pthread_mutex_unlock(&lock);
+    return 1;
 }
 
 int lkupBook(context* c){
-    pthread_mutex_lock(&lock);
+    //pthread_mutex_lock(&lock);
     uint32_t ipad = ((ip*)c->buf)->ip_dst.s_addr;
     printf("Look Up: The address is: %d\n", ipad);
     std::map <uint32_t, SSL*>::iterator it = route_book.find(ipad);
     if(it == route_book.end()){
         printf("Return Address NOT Found in Route Book!!!\n");
+        //pthread_mutex_unlock(&lock);
         return -1;
     }
     else {
         c->ssl = it->second;
     }
+    //pthread_mutex_unlock(&lock);
     return 1;
-    pthread_mutex_unlock(&lock);
 }
 
 void* readSSL(void* v){
@@ -204,7 +208,7 @@ void* readSSL(void* v){
     printf("SSL IN!!!\n");
     context* c = (context*)v;
     int len;
-    while(len = SSL_read(c->ssl, c->buf, MAXINT)){
+    while((len = SSL_read(c->ssl, c->buf, MAXINT))){
         DumpHex(c->buf, len);
         uint32_t ipad = ((ip*)c->buf)->ip_src.s_addr;
         updateBook(ipad, c->ssl);
@@ -212,6 +216,7 @@ void* readSSL(void* v){
         write(c->fd, c->buf, len);
     }
     printf("SSL OUT!!!\n");
+    return 0;
 }
 
 void* readTUN(void* v){
@@ -219,13 +224,14 @@ void* readTUN(void* v){
     printf("TUN IN!!!\n");
     context* c = (context*)v;
     int len;
-    while(len = read(c->fd, c->buf, MAXINT)){
+    while((len = read(c->fd, c->buf, MAXINT))){
         DumpHex(c->buf, len);
         lkupBook(c);
         printf("TUN to SSL!!!\n");
         SSL_write(c->ssl, c->buf, len);
     }
     printf("TUN OUT!!!\n");
+    return 0;
 }
 
 int main(int argc, char* argv[]) {

@@ -24,6 +24,10 @@ int shadow_client(SSL* ssl){
     userpass rp;
     
     int len = SSL_read(ssl, (void*)&rp, 287);
+    if(len != 287) {
+        printf("Invalid Auth Packet!!!\n"); 
+        return -1;
+    }
     //printf("%s\n", rp.user);
     printf("%s\n", rp.pass);
     fflush(stdout);
@@ -38,7 +42,11 @@ int shadow_server(SSL* ssl){
     userpass rp;
 
     int len = SSL_read(ssl, (void*)&up, 287);
-    
+    if(len != 287) {
+        printf("Invalid Auth Packet!!!\n"); 
+        return -1;
+    }
+
     printf("Login name: %s\n", up.user);
     printf("Password  : %s\n", up.pass);
 
