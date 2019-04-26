@@ -22,6 +22,7 @@
 
 #include <pthread.h>
 #include <netinet/ip.h>
+#include <inttypes.h>
 
 #include "shadowAuth.c"
 
@@ -42,6 +43,36 @@ typedef struct context{
     int fd;
     SSL* ssl;
 } context;
+
+void DumpHex(const void* data, size_t size) {
+	char ascii[17];
+	size_t i, j;
+	ascii[16] = '\0';
+	for (i = 0; i < size; ++i) {
+		printf("%02X ", ((unsigned char*)data)[i]);
+		if (((unsigned char*)data)[i] >= ' ' && ((unsigned char*)data)[i] <= '~') {
+			ascii[i % 16] = ((unsigned char*)data)[i];
+		} else {
+			ascii[i % 16] = '.';
+		}
+		if ((i+1) % 8 == 0 || i+1 == size) {
+			printf(" ");
+			if ((i+1) % 16 == 0) {
+				printf("|  %s \n", ascii);
+			} else if (i+1 == size) {
+				ascii[(i+1) % 16] = '\0';
+				if ((i+1) % 16 <= 8) {
+					printf(" ");
+				}
+				for (j = (i+1) % 16; j < 16; ++j) {
+					printf("   ");
+				}
+				printf("|  %s \n", ascii);
+			}
+		}
+	}
+}
+
 /*
 typedef struct userpass{
     char user[32];
@@ -135,6 +166,7 @@ int setupTCPServer(int port)
 }
 
 int updateBook(uint32_t ipad, SSL* ssl){
+    printf("Update: The address is: %d\n", ipad);
     pthread_mutex_lock(&lock);
     std::map <uint32_t, SSL*>::iterator it = route_book.begin();
     int found = 0;
@@ -154,6 +186,7 @@ int updateBook(uint32_t ipad, SSL* ssl){
 int lkupBook(context* c){
     pthread_mutex_lock(&lock);
     uint32_t ipad = ((ip*)c->buf)->ip_dst.s_addr;
+    printf("Look Up: The address is: %d\n", ipad);
     std::map <uint32_t, SSL*>::iterator it = route_book.find(ipad);
     if(it == route_book.end()){
         printf("Return Address NOT Found in Route Book!!!\n");
@@ -172,11 +205,13 @@ void* readSSL(void* v){
     context* c = (context*)v;
     int len;
     while(len = SSL_read(c->ssl, c->buf, MAXINT)){
+        DumpHex(c->buf, len);
         uint32_t ipad = ((ip*)c->buf)->ip_src.s_addr;
         updateBook(ipad, c->ssl);
         printf("SSL to TUN!!!\n");
         write(c->fd, c->buf, len);
     }
+    printf("SSL OUT!!!\n");
 }
 
 void* readTUN(void* v){
@@ -185,10 +220,12 @@ void* readTUN(void* v){
     context* c = (context*)v;
     int len;
     while(len = read(c->fd, c->buf, MAXINT)){
+        DumpHex(c->buf, len);
         lkupBook(c);
         printf("TUN to SSL!!!\n");
         SSL_write(c->ssl, c->buf, len);
     }
+    printf("TUN OUT!!!\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -212,8 +249,6 @@ int main(int argc, char* argv[]) {
     if(argc >= 5){
         key = argv[4];
     }
-
-    
 
     //TLS start
     SSL_library_init();
@@ -250,8 +285,6 @@ int main(int argc, char* argv[]) {
     struct sockaddr_in sa_client;
     size_t client_len;
     int listen_sock = setupTCPServer(port);
-
-    
 
     //create TUN file descriptor
     int tunfd;

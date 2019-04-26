@@ -166,7 +166,7 @@ void* readTUN(void* v){
 
 struct sockaddr_in* resolver(char* hostname){
     struct addrinfo hints, *result;
-
+    memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET; // AF_INET means IPv4 only addresses
     int error = getaddrinfo(hostname, NULL, &hints, &result);
     if (error) {
