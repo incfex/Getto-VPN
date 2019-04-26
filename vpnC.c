@@ -19,6 +19,8 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#include "shadowAuth.c"
+
 #define MAXINT 65535
 #define CHK_SSL(err) if ((err) < 1) { ERR_print_errors_fp(stderr); exit(2); }
 
@@ -29,7 +31,7 @@ typedef struct context{
     int fd;
     SSL* ssl;
 } context;
-
+/*
 typedef struct userpass{
     char user[32];
     char pass[255];
@@ -55,6 +57,7 @@ int shadow_client(SSL* ssl){
     if (rp.user[0] == '1') return 1;
     else return -1;
 }
+*/
 
 int verify_callback(int preverify_ok, X509_STORE_CTX *x509_ctx)
 {
@@ -87,24 +90,19 @@ int createTUNfd() {
     return tunfd;
 }
 
-int setupTCPClient(int port, const char* ipAddr){
+int setupTCPClient(int port, struct sockaddr_in* server_addr){
     printf("Now setting up TCP Client!!!\n");
-    struct sockaddr_in server_addr;
 
     int sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-    memset(&server_addr, '\0', sizeof(server_addr));
+    server_addr->sin_port = htons(port);
+    server_addr->sin_family = AF_INET;
 
-    server_addr.sin_addr.s_addr = inet_addr(ipAddr);
-    server_addr.sin_port = htons(port);
-    server_addr.sin_family = AF_INET;
-
-    connect(sockfd, (struct sockaddr*) &server_addr, sizeof(server_addr));
+    printf("The size of server addr is: %d\n", sizeof(struct sockaddr_in));
+    connect(sockfd, (struct sockaddr*) server_addr, sizeof(struct sockaddr_in));
 
     return sockfd;
 }
-
-
 
 SSL* setupTLSClient(const char* hostname, const char* ca_file, const char* cert, const char* key){
     printf("Now setting up TLS Client!!!\n");
@@ -166,9 +164,28 @@ void* readTUN(void* v){
     }
 }
 
+struct sockaddr_in* resolver(char* hostname){
+    struct addrinfo hints, *result;
+
+    hints.ai_family = AF_INET; // AF_INET means IPv4 only addresses
+    int error = getaddrinfo(hostname, NULL, &hints, &result);
+    if (error) {
+    fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(error));
+    exit(1);
+    }
+    
+    struct sockaddr_in* ip = (struct sockaddr_in *) result->ai_addr;
+    printf("IP Address: %s\n", (char *)inet_ntoa(ip->sin_addr));
+    freeaddrinfo(result);
+
+    struct sockaddr_in* serverIP = (struct sockaddr_in *) result->ai_addr;
+    
+    return serverIP;
+}
+
 int main (int argc, char * argv[]){
     int port = 2552;
-    char* server_ip = "127.0.0.1";
+    char* server_ip = "";
     char* hostname = "feng.kuroa.me";
     char* ca_file = "./ca.crt";
     char* cert = "./cert_server/server.crt";
@@ -192,8 +209,18 @@ int main (int argc, char * argv[]){
         key = argv[6];
     }
 
+    struct sockaddr_in* socketInfo;
+
+    if(strlen(server_ip) <= 0){
+        socketInfo = resolver(hostname);
+    }
+    else{
+        socketInfo = resolver(server_ip);
+    }
+
+
     //create socks for TLS connection
-    int sockfd = setupTCPClient(port, server_ip);
+    int sockfd = setupTCPClient(port, socketInfo);
     SSL *ssl = setupTLSClient(hostname, ca_file, cert, key);
 
     SSL_set_fd(ssl, sockfd);

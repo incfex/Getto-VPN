@@ -1,5 +1,6 @@
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <arpa/inet.h>
@@ -7,6 +8,9 @@
 #include <linux/if_tun.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <vector>
+#include <map>
+#include <utility>
 
 #include <arpa/inet.h>
 #include <openssl/ssl.h>
@@ -17,6 +21,9 @@
 #include <crypt.h>
 
 #include <pthread.h>
+#include <netinet/ip.h>
+
+#include "shadowAuth.c"
 
 #define BUFF_SIZE 1500
 #define MAXINT 65536
@@ -27,12 +34,15 @@
 
 struct sockaddr_in peerAddr;
 
+std::map <uint32_t, SSL*> route_book;
+pthread_mutex_t lock;
+
 typedef struct context{
     char* buf;
     int fd;
     SSL* ssl;
 } context;
-
+/*
 typedef struct userpass{
     char user[32];
     char pass[255];
@@ -73,7 +83,7 @@ int shadow_server(SSL* ssl){
     SSL_write(ssl, (void*)&rp, 287);
     return 1;
 }
-
+*/
 int verify_callback(int preverify_ok, X509_STORE_CTX *x509_ctx)
 {
     char  buf[300];
@@ -124,12 +134,46 @@ int setupTCPServer(int port)
     return listen_sock;
 }
 
+int updateBook(uint32_t ipad, SSL* ssl){
+    pthread_mutex_lock(&lock);
+    std::map <uint32_t, SSL*>::iterator it = route_book.begin();
+    int found = 0;
+    while(it != route_book.end()){
+        if(it->first == ipad){
+            found = 1;
+            it->second = ssl;
+        }
+    }
+    if(!found){
+        std::pair <uint32_t, SSL*> record (ipad, ssl);
+        route_book.insert(record);
+    }
+    pthread_mutex_unlock(&lock);
+}
+
+int lkupBook(context* c){
+    pthread_mutex_lock(&lock);
+    uint32_t ipad = ((ip*)c->buf)->ip_dst.s_addr;
+    std::map <uint32_t, SSL*>::iterator it = route_book.find(ipad);
+    if(it == route_book.end()){
+        printf("Return Address NOT Found in Route Book!!!\n");
+        return -1;
+    }
+    else {
+        c->ssl = it->second;
+    }
+    return 1;
+    pthread_mutex_unlock(&lock);
+}
+
 void* readSSL(void* v){
     //And write into TUN
     printf("SSL IN!!!\n");
     context* c = (context*)v;
     int len;
     while(len = SSL_read(c->ssl, c->buf, MAXINT)){
+        uint32_t ipad = ((ip*)c->buf)->ip_src.s_addr;
+        updateBook(ipad, c->ssl);
         printf("SSL to TUN!!!\n");
         write(c->fd, c->buf, len);
     }
@@ -141,6 +185,7 @@ void* readTUN(void* v){
     context* c = (context*)v;
     int len;
     while(len = read(c->fd, c->buf, MAXINT)){
+        lkupBook(c);
         printf("TUN to SSL!!!\n");
         SSL_write(c->ssl, c->buf, len);
     }
@@ -148,9 +193,13 @@ void* readTUN(void* v){
 
 int main(int argc, char* argv[]) {
     int port = 2552;
-    char* ca_file = "./ca.crt";
-    char* cert = "./cert_server/server.crt";
-    char* key = "./cert_server/server-nopa.key";
+    char *ca_file, *cert, *key;
+    ca_file = (char*) malloc(100);
+    cert = (char*) malloc(100);
+    key = (char*) malloc(100);
+    memcpy(ca_file, "./ca.crt", 100);
+    memcpy(cert, "./cert_server/server.crt", 100);
+    memcpy(key, "./cert_server/server-nopa.key", 100);
     if(argc >= 2){
         port = atoi(argv[1]);
     }
@@ -202,36 +251,39 @@ int main(int argc, char* argv[]) {
     size_t client_len;
     int listen_sock = setupTCPServer(port);
 
-    int sock = accept(listen_sock, (struct sockaddr*)&sa_client, &client_len);
-    close (listen_sock);
-    SSL_set_fd (ssl, sock);
-    err = SSL_accept (ssl);
-    CHK_SSL(err);
-    printf ("SSL connection established!\n");
-
-    if(shadow_server(ssl) <= 0) exit(0);
+    
 
     //create TUN file descriptor
     int tunfd;
     tunfd = createTUNfd();
-
-    char sslbuf[MAXINT];
     char tunbuf[MAXINT];
-    bzero(sslbuf, MAXINT);
     bzero(tunbuf, MAXINT);
 
-    //pthread START
-    pthread_t sslT;
     pthread_t tunT;
-
-    context sslC;
-    sslC.buf = sslbuf; sslC.fd = tunfd; sslC.ssl = ssl;
     context tunC;
     tunC.buf = tunbuf; tunC.fd = tunfd; tunC.ssl = ssl;
-
-    pthread_create(&sslT, NULL, readSSL, &sslC);
     pthread_create(&tunT, NULL, readTUN, &tunC);
 
-    pthread_join(sslT, NULL);
+    //Multi-client
+    while(int sock = accept(listen_sock, (struct sockaddr*)&sa_client, &client_len)){
+        SSL_set_fd (ssl, sock);
+        err = SSL_accept (ssl);
+        CHK_SSL(err);
+        printf("SSL connection established!\n");
+        //Authentication
+        if(shadow_server(ssl) <= 0) continue;
+        //Start reading
+        char sslbuf[MAXINT];
+        bzero(sslbuf, MAXINT);
+        //pthread START
+        pthread_t sslT;
+        context sslC;
+        sslC.buf = sslbuf; sslC.fd = tunfd; sslC.ssl = ssl;
+        pthread_create(&sslT, NULL, readSSL, &sslC);
+    }
+    
+    
+    //pthread joining
+    //pthread_join(sslT, NULL);
     pthread_join(tunT, NULL);
 }
